@@ -1,0 +1,264 @@
+#include <Keypad.h>
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+
+// Create the LCD object for I2C
+LiquidCrystal_I2C lcd(0x27,16,2);
+
+String expr = "";
+const byte ROWS = 4, COLS = 4;
+
+/*const int analogPin = A0;
+int raw = 0;
+const int Vin = 5;
+float Vout = 0;
+const float R1 = 5000; // Known resistor value
+float R2 = 0;
+float buffer = 0;
+*/
+/*void measureResistance() {
+    raw = analogRead(analogPin);
+    if (raw) {
+        Vout = (raw * Vin) / 1024.0; // Calculate Vout correctly
+        R2 = round((Vout*R1)/(Vin-Vout));
+        R2=R2+R2*0.05;
+        Serial.print("raw: ");
+        Serial.println(raw);
+        Serial.print("Vout: ");
+        Serial.println(Vout);
+        Serial.print("buffer: ");
+        Serial.println(buffer);
+        Serial.print("R2: ");
+        Serial.println(R2);
+        
+        lcd.setCursor(0, 0);
+        lcd.print("R2: ");
+        lcd.print(R2);
+        lcd.print(" ohms");
+        delay(1000);
+    }
+}*/
+
+const int powBtn = 8, decBtn = 9, logBtn = 10, sinBtn = 11, cosBtn = 12, shiftBtn = 13;
+bool powState = LOW, decState = LOW, logState = LOW, sinState = LOW, cosState = LOW, shiftState = LOW, shiftMode = false;
+
+char keys[ROWS][COLS] = {
+  {'1','2','3','+'},
+  {'4','5','6','-'},
+  {'7','8','9','*'},
+  {'C','0','=','/'}
+};
+byte rowPins[ROWS] = {7, 6, 5, 4}; 
+byte colPins[COLS] = {3, 2, 1, 0}; 
+
+Keypad keypad = Keypad(makeKeymap(keys), rowPins, colPins, ROWS, COLS); 
+
+void appendOp(char op, const char* text = nullptr);
+
+void setup() {
+    lcd.init();
+    lcd.backlight();
+    lcd.setCursor(0, 0);
+    lcd.print("Calculator");
+    delay(2000);
+    lcd.clear();
+    pinMode(powBtn, INPUT);
+    pinMode(decBtn, INPUT);
+    pinMode(logBtn, INPUT);
+    pinMode(sinBtn, INPUT);
+    pinMode(cosBtn, INPUT);
+    pinMode(shiftBtn, INPUT);
+}
+
+void loop() {
+    char key = keypad.getKey();
+    powState = digitalRead(powBtn);
+    decState = digitalRead(decBtn);
+    logState = digitalRead(logBtn);
+    sinState = digitalRead(sinBtn);
+    cosState = digitalRead(cosBtn);
+    bool shiftBtnPressed = digitalRead(shiftBtn) == HIGH;
+
+    delay(50); // Debounce delay
+
+/*    if (shiftBtnPressed && !shiftState) {
+        shiftMode = !shiftMode;
+        lcd.clear();
+        lcd.setCursor(0, 0);
+        lcd.print("Shift Mode: ");
+        lcd.print(shiftMode ? "ON" : "OFF");
+        delay(500); // Simple debounce delay to prevent multiple toggles
+        lcd.clear();
+    }
+    shiftState = shiftBtnPressed;
+*/
+    if (key) {
+        if (isDigit(key) || isOp(key)) {
+            expr += key;
+            lcd.print(key);
+        } else if (key == '=') {
+            if (isValidExpr(expr)) {
+                lcd.setCursor(0, 1);
+                lcd.print("Result: ");
+                lcd.print(evalExpr(expr));
+            } else {
+                lcd.clear();
+                lcd.setCursor(0, 0);
+                lcd.print("SYNTAX ERROR");
+            }
+            expr = "";
+        } else if (key == 'C') {
+            resetCalc();
+        }
+    }
+
+/*    if (powState == HIGH) {
+        appendOp('^');
+    }
+
+    if (decState == HIGH) {
+        appendOp('.');
+    }
+
+    if (logState == HIGH) {
+        appendOp('l', "ln");
+    }
+
+    if (sinState == HIGH) {
+        appendOp(shiftMode ? 'S' : 's', shiftMode ? "sin-1" : "sin");
+    }
+
+    if (cosState == HIGH) {
+        appendOp(shiftMode ? 'Z' : 'c', shiftMode ? "cos-1" : "cos");
+    }
+    //measureResistance();*/
+}
+
+void appendOp(char op, const char* text) {
+    expr += op;
+    if (text) {
+        lcd.print(text);
+    } else {
+        lcd.print(op);
+    }
+    delay(300);
+    while (digitalRead(op == '^' ? powBtn : op == '.' ? decBtn : op == 'l' ? logBtn : op == 's' ? sinBtn : op == 'c' ? cosBtn : shiftBtn) == HIGH) {
+        delay(50); // Debounce delay
+    }
+}
+
+double evalExpr(String expr) {
+    int len = expr.length();
+    double nums[16];
+    char ops[16];
+    int numTop = -1, opTop = -1;
+
+    for (int i = 0; i < len; i++) {
+        char c = expr.charAt(i);
+
+        if (isDigit(c) || c == '.') {
+            String numStr = "";
+            while (i < len && (isDigit(expr.charAt(i)) || expr.charAt(i) == '.')) {
+                numStr += expr.charAt(i);
+                i++;
+            }
+            nums[++numTop] = numStr.toDouble();
+            i--;
+        } else if (isOp(c)) {
+            if (c == 'l' || c == 's' || c == 'c' || c == 'S' || c == 'Z') { // Handle log, sine, cosine, and their inverses separately
+            i++; // Move to the next character
+            String numStr = "";
+            while (i < len && (isDigit(expr.charAt(i)) || expr.charAt(i) == '.')) {
+                numStr += expr.charAt(i);
+                i++;
+            }
+            nums[++numTop] = (c == 'l') ? log(numStr.toDouble()) : 
+                              (c == 's') ? sin(numStr.toDouble()) : 
+                              (c == 'c') ? cos(numStr.toDouble()): 
+                              (c == 'S') ? round(asin(numStr.toDouble())*(180/3.14)): 
+                              (c == 'Z') ? round(acos(numStr.toDouble())*(180/3.14)): 
+                              acos(numStr.toDouble());
+            i--;
+}            
+          else {
+                while (opTop != -1 && prec(ops[opTop]) >= prec(c)) {
+                    double b = nums[numTop--];
+                    double a = nums[numTop--];
+                    char op = ops[opTop--];
+                    nums[++numTop] = applyOp(a, b, op);
+                }
+                ops[++opTop] = c;
+            }
+        }
+    }
+
+    while (opTop != -1) {
+        double b = nums[numTop--];
+        double a = nums[numTop--];
+        char op = ops[opTop--];
+        nums[++numTop] = applyOp(a, b, op);
+    }
+
+    return nums[numTop];
+}
+
+bool isValidExpr(String expr) {
+    int len = expr.length();
+    bool lastWasOp = true, lastWasUnaryOp = false;
+
+    for (int i = 0; i < len; i++) {
+        char c = expr.charAt(i);
+        if (isDigit(c) || c == '.') {
+            lastWasOp = lastWasUnaryOp = false;
+        } else if (isOp(c)) {
+            if (c == 'l' || c == 's' || c=='c' || c=='Z'||c=='S') {
+                if (!lastWasOp && !lastWasUnaryOp) return false;
+                lastWasUnaryOp = true;
+            } else {
+                if (lastWasOp || lastWasUnaryOp) return false;
+                lastWasOp = true;
+            }
+        } else {
+            return false;
+        }
+    }
+
+    return !lastWasOp;
+}
+
+int prec(char op) {
+    if (op == '+' || op == '-') return 1;
+    if (op == '*' || op == '/') return 2;
+    if (op == '^') return 3;
+    if (op == 'l' || op == 's' || op=='c') return 4;
+    return 0;
+}
+
+double applyOp(double a, double b, char op) {
+    switch (op) {
+        case '+': return a + b;
+        case '-': return a - b;
+        case '*': return a * b;
+        case '/': return b == 0 ? 0 : a / b;
+        case '^': return pow(a, b);
+        case 'l': return log(a);
+        case 's': return sin(a);
+        case 'c': return cos(a);
+        case 'S': return (asin(a)/3.14)*180;
+        case 'Z': return acos(a)*(180/3.14);
+    }
+    return 0;
+}
+
+void resetCalc() {
+    expr = "";
+    lcd.clear();
+}
+
+bool isDigit(char c) {
+    return (c >= '0' && c <= '9');
+}
+
+bool isOp(char c) {
+  return (c == '+' || c == '-' || c == '*' || c == '/' || c == '^' || c == 'l' || c == 's' || c == 'c' || c == 'S' || c == 'Z');
+}
